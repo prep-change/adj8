@@ -13,7 +13,7 @@
     <div id="input-area" class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6"></div>
 
     <button onclick="calculateShortage()" class="w-full bg-blue-500 text-white py-2 rounded mb-4">不足を計算する</button>
-    <button onclick="adjustShortageWithWorker()" class="w-full bg-green-500 text-white py-2 rounded">調整 (Web Worker)</button>
+    <button onclick="adjustShortageWithWorker()" class="w-full bg-green-500 text-white py-2 rounded">調整</button>
 
     <div id="shortageResult" class="mt-6 bg-white p-4 rounded shadow whitespace-pre-wrap"></div>
     <div id="adjustmentResult" class="mt-6 bg-white p-4 rounded shadow whitespace-pre-wrap"></div>
@@ -21,7 +21,6 @@
   </div>
 
   <script>
-    // 金種と目標設定
     const denominations = [10000, 5000, 2000, 1000, 500, 100, 50, 10, 5, 1];
     const baseTargets = {
       10000: 0,
@@ -36,7 +35,8 @@
       1: 20
     };
 
-    // 入力フィールドの初期化
+    let latestInput = {};
+
     const inputArea = document.getElementById("input-area");
     denominations.forEach(denom => {
       const wrapper = document.createElement("div");
@@ -48,12 +48,12 @@
       inputArea.appendChild(wrapper);
     });
 
-    // 不足金計算
     function calculateShortage() {
       const input = {};
       denominations.forEach(denom => {
         input[denom] = parseInt(document.getElementById(`input${denom}`).value || "0", 10);
       });
+      latestInput = input;
 
       let resultText = `【調整前不足金種】\n`;
       let total = 0;
@@ -71,19 +71,24 @@
       document.getElementById("changeCollectionResult").innerText = "";
     }
 
-    // Web Workerを使った調整
     function adjustShortageWithWorker() {
-      const input = {};
-      denominations.forEach(denom => {
-        input[denom] = parseInt(document.getElementById(`input${denom}`).value || "0", 10);
-      });
+      if (!latestInput || Object.keys(latestInput).length === 0) {
+        document.getElementById("adjustmentResult").innerText = "※ 先に「不足を計算する」を押してください。";
+        return;
+      }
 
       const worker = new Worker('./worker.js');
-      worker.postMessage({ input, baseTargets });
+      document.getElementById("adjustmentResult").innerText = "調整中です...";
+      document.getElementById("changeCollectionResult").innerText = "";
+
+      worker.postMessage({
+        input: latestInput,
+        baseTargets,
+        denominations
+      });
 
       worker.onmessage = (event) => {
         const { shortageResultText, combinedResultText } = event.data;
-
         document.getElementById("adjustmentResult").innerText = shortageResultText;
         document.getElementById("changeCollectionResult").innerText = combinedResultText;
       };
