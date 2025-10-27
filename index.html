@@ -20,6 +20,7 @@
       <input id="maxTryInput" type="number" value="12" min="0" max="25" class="p-1 border rounded w-20">
       <p class="text-sm text-gray-600">(15以上にすると計算に数分かかる場合があります)</p>
     </div>
+
     <div id="shortageResult" class="mt-6 bg-white p-4 rounded shadow whitespace-pre-wrap"></div>
     <div id="adjustmentResult" class="mt-6 bg-white p-4 rounded shadow whitespace-pre-wrap"></div>
     <div id="changeCollectionResult" class="mt-6 bg-white p-4 rounded shadow whitespace-pre-wrap"></div>
@@ -42,7 +43,7 @@
     };
 
     let latestInput = {};
-    let isCalculating = false; // 計算中フラグ
+    let isCalculating = false;
 
     // --- Web Worker のコードを Blob として定義 ---
     const workerScript = `
@@ -51,15 +52,10 @@
       const denominations = [10000, 5000, 2000, 1000, 500, 100, 50, 10, 5, 1];
       const knapsackCache = new Map();
 
-      /**
-       * Knapsack (ナップサック問題) 関数 (最適化版)
-       * totalCoins の呼び出しを排除し、DPテーブルに最小枚数を保持する
-       */
       function knapsack(usableCoins, targetAmount) {
         const key = JSON.stringify(usableCoins) + "|" + targetAmount;
         if (knapsackCache.has(key)) return knapsackCache.get(key);
 
-        // dp[a] = { coins: 最小枚数, combo: {...} }
         const dp = Array(targetAmount + 1).fill(null);
         dp[0] = { coins: 0, combo: {} };
 
@@ -87,9 +83,6 @@
         return result;
       }
 
-      /**
-       * generateAdjustmentPatterns のためのバックトラッキングヘルパー
-       */
       function backtrack(denoms, baseTargets, excludeSet, i, remaining, current, patterns) {
         if (i === denoms.length) {
           if (remaining === 0) patterns.push({ ...current });
@@ -111,9 +104,6 @@
         current[denom] = baseTargets[denom];
       }
 
-      /**
-       * 調整パターンを生成する (Worker 内)
-       */
       function generateAdjustmentPatterns(baseTargets, extraCount, excludeSet) {
         if (extraCount === 0) return [Object.assign({}, baseTargets)];
         const patterns = [];
@@ -126,9 +116,6 @@
         return patterns;
       }
 
-      /**
-       * 最適な調整を見つける (Worker 内)
-       */
       function findOptimalAdjustment(input, baseTargets, excludeSet, maxTry) {
         for (let t = 0; t <= maxTry; t++) {
           const patterns = generateAdjustmentPatterns(baseTargets, t, excludeSet);
@@ -162,9 +149,6 @@
         return null;
       }
 
-      /**
-       * Worker のメッセージハンドラ
-       */
       self.onmessage = (e) => {
         const { input, baseTargets, excludeSetArray, maxTry } = e.data;
         
@@ -192,8 +176,6 @@
     }
 
     // --- メインスレッドの関数 ---
-
-    // 入力エリアの生成
     const inputArea = document.getElementById("input-area");
     denominations.forEach(denom => {
       const wrapper = document.createElement("div");
@@ -205,7 +187,6 @@
       inputArea.appendChild(wrapper);
     });
 
-    // 不足計算
     function calculateShortage() {
       const input = {};
       denominations.forEach(denom => {
@@ -229,9 +210,6 @@
       document.getElementById("changeCollectionResult").innerText = "";
     }
 
-    /**
-     * 調整 (Worker 呼び出し)
-     */
     async function adjustShortage() {
       if (!worker) {
            document.getElementById("adjustmentResult").innerText = "※ Workerが初期化されておらず実行できません。";
@@ -267,7 +245,6 @@
       const maxTryInput = document.getElementById('maxTryInput');
       const maxTry = maxTryInput ? (parseInt(maxTryInput.value, 10) || 12) : 12;
 
-      // Worker に計算を依頼
       worker.postMessage({
         input: input,
         baseTargets: baseTargets,
@@ -320,7 +297,8 @@
               totalCollected += amount;
             }
           }
-          combinedResultText += `合計{totalCollected.toLocaleString()}円\n\n`;
+          // ▼▼▼ 修正済み (1/2) ▼▼▼
+          combinedResultText += `合計 \${totalCollected.toLocaleString()}円\n\n`;
           
           combinedResultText += `封筒に入れるもの\n`;
           let 補填合計 = 0;
@@ -331,7 +309,8 @@
               combinedResultText += `${denom}円×${combo[denom]}枚 = ${amount.toLocaleString()}円\n`;
             }
           }
-          combinedResultText += `合計{補填合計.toLocaleString()}円`;
+          // ▼▼▼ 修正済み (2/2) ▼▼▼
+          combinedResultText += `合計 \${補填合計.toLocaleString()}円`;
 
           document.getElementById("changeCollectionResult").innerText = combinedResultText;
         };
