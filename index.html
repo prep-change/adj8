@@ -15,6 +15,11 @@
     <button onclick="calculateShortage()" class="w-full bg-blue-500 text-white py-2 rounded mb-4">不足を計算する</button>
     <button onclick="adjustShortage()" class="w-full bg-green-500 text-white py-2 rounded">調整</button>
 
+    <div class="mt-4 mb-2 text-center">
+      <label for="maxTryInput" class="mr-2 font-medium">最大試行回数 (t):</label>
+      <input id="maxTryInput" type="number" value="12" min="0" max="25" class="p-1 border rounded w-20">
+      <p class="text-sm text-gray-600">(15以上にすると計算に数分かかる場合があります)</p>
+    </div>
     <div id="shortageResult" class="mt-6 bg-white p-4 rounded shadow whitespace-pre-wrap"></div>
     <div id="adjustmentResult" class="mt-6 bg-white p-4 rounded shadow whitespace-pre-wrap"></div>
     <div id="changeCollectionResult" class="mt-6 bg-white p-4 rounded shadow whitespace-pre-wrap"></div>
@@ -37,8 +42,158 @@
     };
 
     let latestInput = {};
-    const knapsackCache = new Map();
+    let isCalculating = false; // 計算中フラグ
 
+    // --- Web Worker のコードを Blob として定義 ---
+    const workerScript = `
+      // === Worker スコープここから ===
+      
+      const denominations = [10000, 5000, 2000, 1000, 500, 100, 50, 10, 5, 1];
+      const knapsackCache = new Map();
+
+      /**
+       * Knapsack (ナップサック問題) 関数 (最適化版)
+       * totalCoins の呼び出しを排除し、DPテーブルに最小枚数を保持する
+       */
+      function knapsack(usableCoins, targetAmount) {
+        const key = JSON.stringify(usableCoins) + "|" + targetAmount;
+        if (knapsackCache.has(key)) return knapsackCache.get(key);
+
+        // dp[a] = { coins: 最小枚数, combo: {...} }
+        const dp = Array(targetAmount + 1).fill(null);
+        dp[0] = { coins: 0, combo: {} };
+
+        for (let [denom, count] of usableCoins) {
+          for (let a = targetAmount; a >= 0; a--) {
+            if (dp[a] !== null) {
+              for (let k = 1; k <= count; k++) {
+                const newAmount = a + denom * k;
+                if (newAmount > targetAmount) break;
+                
+                const newCoins = dp[a].coins + k;
+                
+                if (dp[newAmount] === null || newCoins < dp[newAmount].coins) {
+                  const newCombo = { ...dp[a].combo };
+                  newCombo[denom] = (newCombo[denom] || 0) + k;
+                  dp[newAmount] = { coins: newCoins, combo: newCombo };
+                }
+              }
+            }
+          }
+        }
+        
+        const result = dp[targetAmount] ? dp[targetAmount].combo : null;
+        knapsackCache.set(key, result);
+        return result;
+      }
+
+      /**
+       * generateAdjustmentPatterns のためのバックトラッキングヘルパー
+       */
+      function backtrack(denoms, baseTargets, excludeSet, i, remaining, current, patterns) {
+        if (i === denoms.length) {
+          if (remaining === 0) patterns.push({ ...current });
+          return;
+        }
+        const denom = denoms[i];
+        
+        if (baseTargets[denom] === undefined) {
+           backtrack(denoms, baseTargets, excludeSet, i + 1, remaining, current, patterns);
+           return;
+        }
+
+        const limit = excludeSet.has(denom) ? 0 : ((denom === 5000) ? Math.min(1, remaining) : remaining);
+        
+        for (let add = 0; add <= limit; add++) {
+          current[denom] = baseTargets[denom] + add;
+          backtrack(denoms, baseTargets, excludeSet, i + 1, remaining - add, current, patterns);
+        }
+        current[denom] = baseTargets[denom];
+      }
+
+      /**
+       * 調整パターンを生成する (Worker 内)
+       */
+      function generateAdjustmentPatterns(baseTargets, extraCount, excludeSet) {
+        if (extraCount === 0) return [Object.assign({}, baseTargets)];
+        const patterns = [];
+        const denoms = Object.keys(baseTargets).map(Number);
+        
+        const current = {};
+        denoms.forEach(d => { current[d] = baseTargets[d]; });
+
+        backtrack(denoms, baseTargets, excludeSet, 0, extraCount, current, patterns);
+        return patterns;
+      }
+
+      /**
+       * 最適な調整を見つける (Worker 内)
+       */
+      function findOptimalAdjustment(input, baseTargets, excludeSet, maxTry) {
+        for (let t = 0; t <= maxTry; t++) {
+          const patterns = generateAdjustmentPatterns(baseTargets, t, excludeSet);
+          
+          for (let newTargets of patterns) {
+            const shortage = {};
+            let shortageTotal = 0;
+
+            for (let denom of denominations) {
+              const need = newTargets[denom] || 0;
+              const lack = Math.max(0, need - input[denom]);
+              if (lack > 0) {
+                shortage[denom] = lack;
+                shortageTotal += denom * lack;
+              }
+            }
+
+            const usableCoins = denominations.map(denom => {
+              const adjustedInput = input[denom] + (shortage[denom] || 0);
+              const target = newTargets[denom] || 0;
+              const usable = (adjustedInput > target) ? (adjustedInput - target) : 0;
+              return [denom, usable];
+            }).filter(([_, count]) => count > 0);
+
+            const combo = knapsack(usableCoins, shortageTotal);
+            if (combo) {
+              return { newTargets, shortage, shortageTotal, combo };
+            }
+          }
+        }
+        return null;
+      }
+
+      /**
+       * Worker のメッセージハンドラ
+       */
+      self.onmessage = (e) => {
+        const { input, baseTargets, excludeSetArray, maxTry } = e.data;
+        
+        let excluded = new Set(excludeSetArray);
+        
+        let best = findOptimalAdjustment(input, baseTargets, excluded, maxTry);
+        if (!best && excluded.size > 0) {
+          excluded = new Set();
+          best = findOptimalAdjustment(input, baseTargets, excluded, maxTry);
+        }
+        
+        postMessage(best);
+      };
+      // === Worker スコープここまで ===
+    `;
+
+    // --- Web Worker の初期化 ---
+    const blob = new Blob([workerScript], { type: 'application/javascript' });
+    let worker;
+    try {
+         worker = new Worker(URL.createObjectURL(blob));
+    } catch (e) {
+        console.error("Workerの初期化に失敗しました:", e);
+        alert("Web Workerの起動に失敗しました。ブラウザが対応していないか、セキュリティ設定が原因の可能性があります。");
+    }
+
+    // --- メインスレッドの関数 ---
+
+    // 入力エリアの生成
     const inputArea = document.getElementById("input-area");
     denominations.forEach(denom => {
       const wrapper = document.createElement("div");
@@ -50,6 +205,7 @@
       inputArea.appendChild(wrapper);
     });
 
+    // 不足計算
     function calculateShortage() {
       const input = {};
       denominations.forEach(denom => {
@@ -73,168 +229,130 @@
       document.getElementById("changeCollectionResult").innerText = "";
     }
 
+    /**
+     * 調整 (Worker 呼び出し)
+     */
     async function adjustShortage() {
+      if (!worker) {
+           document.getElementById("adjustmentResult").innerText = "※ Workerが初期化されておらず実行できません。";
+           return;
+      }
+      if (isCalculating) {
+        document.getElementById("adjustmentResult").innerText = "※ 現在計算中です。お待ちください...";
+        return;
+      }
       if (!latestInput || Object.keys(latestInput).length === 0) {
         document.getElementById("adjustmentResult").innerText = "※ 先に「不足を計算する」を押してください。";
         return;
       }
 
-      const input = latestInput;
+      isCalculating = true;
+      document.getElementById("adjustmentResult").innerText = "調整中です... (時間がかかる場合があります)";
+      document.getElementById("changeCollectionResult").innerText = "";
+      
+      const adjButton = document.querySelector('button[onclick="adjustShortage()"]');
+      adjButton.disabled = true;
+      adjButton.classList.add('bg-gray-400');
+      adjButton.classList.remove('bg-green-500');
 
-      // 自動固定候補（目標達成済みの金種）
+
+      const input = latestInput;
       const autoFixed = new Set(
         denominations.filter(denom =>
           input[denom] >= baseTargets[denom]
         )
       );
-
-      // 最初は自動固定を除外して試す
-      let excluded = autoFixed;
-
-      document.getElementById("adjustmentResult").innerText = "調整中です...";
-      await new Promise(resolve => setTimeout(resolve, 50));
-
-      let best = findOptimalAdjustment(input, baseTargets, excluded);
-      if (!best && autoFixed.size > 0) {
-        // 自動固定を外して再試行
-        excluded = new Set();
-        best = findOptimalAdjustment(input, baseTargets, excluded);
-      }
-
-      if (!best) {
-        document.getElementById("adjustmentResult").innerText = "※ 補填できませんでした。";
-        document.getElementById("changeCollectionResult").innerText = "";
-        return;
-      }
-
-      const { shortage, shortageTotal, combo, newTargets } = best;
-
-      // 【調整後不足金種】をadjustmentResultに出力
-      let shortageResultText = `【調整後不足金種】 以下を封筒に書く\n`;
-      for (let denom of denominations) {
-        if (shortage[denom]) {
-          shortageResultText += `${denom}円×${shortage[denom]}枚 = ${denom * shortage[denom]}円\n`;
-        }
-      }
-      shortageResultText += `合計　${shortageTotal.toLocaleString()}円`;
-
-      document.getElementById("adjustmentResult").innerText = shortageResultText;
-
-      let combinedResultText = `【釣銭回収】\n 袋/ケースに入れるもの \n`;
-      let totalCollected = 0;
-      for (let denom of denominations) {
-        // baseTargetsから調整後不足枚数を引く
-        const collected = (baseTargets[denom] || 0) - (shortage[denom] || 0);
-
-        if (collected > 0) {
-          const amount = denom * collected;
-          combinedResultText += `${denom}円×${collected}枚 = ${amount.toLocaleString()}円\n`;
-          totalCollected += amount;
-        }
-      }
-      combinedResultText += `合計　${totalCollected.toLocaleString()}円\n\n`;
+      const excludeSetArray = Array.from(autoFixed);
       
-      combinedResultText += `封筒に入れるもの\n`;
-      let 補填合計 = 0;
-      for (let denom of denominations) {
-        if (combo[denom]) {
-          const amount = denom * combo[denom];
-          補填合計 += amount;
-          combinedResultText += `${denom}円×${combo[denom]}枚 = ${amount.toLocaleString()}円\n`;
-        }
-      }
-      combinedResultText += `合計　${補填合計.toLocaleString()}円`;
+      const maxTryInput = document.getElementById('maxTryInput');
+      const maxTry = maxTryInput ? (parseInt(maxTryInput.value, 10) || 12) : 12;
 
-      document.getElementById("changeCollectionResult").innerText = combinedResultText;
+      // Worker に計算を依頼
+      worker.postMessage({
+        input: input,
+        baseTargets: baseTargets,
+        excludeSetArray: excludeSetArray,
+        maxTry: maxTry
+      });
     }
 
-    function findOptimalAdjustment(input, baseTargets, excludeSet, maxTry = 12) {
-      for (let t = 0; t <= maxTry; t++) {
-        const patterns = generateAdjustmentPatterns(baseTargets, t, excludeSet);
-        for (let newTargets of patterns) {
-          const shortage = {};
-          let shortageTotal = 0;
+    if (worker) {
+        /**
+         * Worker からの結果受信
+         */
+        worker.onmessage = (e) => {
+          const best = e.data;
+          isCalculating = false; 
+          
+          const adjButton = document.querySelector('button[onclick="adjustShortage()"]');
+          if (adjButton) {
+              adjButton.disabled = false;
+              adjButton.classList.remove('bg-gray-400');
+              adjButton.classList.add('bg-green-500');
+          }
 
+          if (!best) {
+            document.getElementById("adjustmentResult").innerText = "※ 補填できませんでした。 (試行回数を増やして試してください)";
+            document.getElementById("changeCollectionResult").innerText = "";
+            return;
+          }
+
+          const { shortage, shortageTotal, combo, newTargets } = best;
+
+          let shortageResultText = `【調整後不足金種】 以下を封筒に書く\n`;
           for (let denom of denominations) {
-            const need = newTargets[denom] || 0;
-            const lack = Math.max(0, need - input[denom]);
-            if (lack > 0) {
-              shortage[denom] = lack;
-              shortageTotal += denom * lack;
+            if (shortage[denom]) {
+              shortageResultText += `${denom}円×${shortage[denom]}枚 = ${denom * shortage[denom]}円\n`;
             }
           }
+          shortageResultText += `合計　${shortageTotal.toLocaleString()}円`;
 
-          const usableCoins = denominations.map(denom => {
-            const adjustedInput = input[denom] + (shortage[denom] || 0);
-            const usable = adjustedInput - (newTargets[denom] || 0);
-            return [denom, usable];
-          }).filter(([_, count]) => count > 0);
+          document.getElementById("adjustmentResult").innerText = shortageResultText;
 
-          const combo = knapsack(usableCoins, shortageTotal);
-          if (combo) {
-            return { newTargets, shortage, shortageTotal, combo };
-          }
-        }
-      }
-      return null;
-    }
+          let combinedResultText = `【釣銭回収】\n 袋/ケースに入れるもの \n`;
+          let totalCollected = 0;
+          for (let denom of denominations) {
+            const collected = (baseTargets[denom] || 0) - (shortage[denom] || 0);
 
-    function generateAdjustmentPatterns(baseTargets, extraCount, excludeSet) {
-      if (extraCount === 0) return [Object.assign({}, baseTargets)];
-      const patterns = [];
-      const denoms = Object.keys(baseTargets).map(Number);
-
-      function backtrack(i, remaining, current) {
-        if (i === denoms.length) {
-          if (remaining === 0) patterns.push({ ...current });
-          return;
-        }
-        const denom = denoms[i];
-        const limit = excludeSet.has(denom) ? 0 : ((denom === 5000) ? Math.min(1, remaining) : remaining);
-        for (let add = 0; add <= limit; add++) {
-          current[denom] = baseTargets[denom] + add;
-          backtrack(i + 1, remaining - add, current);
-        }
-      }
-
-      backtrack(0, extraCount, {});
-      return patterns;
-    }
-
-    function knapsack(usableCoins, targetAmount) {
-      const key = JSON.stringify(usableCoins) + "|" + targetAmount;
-      if (knapsackCache.has(key)) return knapsackCache.get(key);
-
-      const dp = Array(targetAmount + 1).fill(null);
-      dp[0] = {};
-
-      for (let [denom, count] of usableCoins) {
-        for (let a = targetAmount; a >= 0; a--) {
-          if (dp[a] !== null) {
-            for (let k = 1; k <= count; k++) {
-              const newAmount = a + denom * k;
-              if (newAmount > targetAmount) break;
-              const newCombo = { ...dp[a] };
-              newCombo[denom] = (newCombo[denom] || 0) + k;
-
-              if (
-                dp[newAmount] === null ||
-                totalCoins(newCombo) < totalCoins(dp[newAmount])
-              ) {
-                dp[newAmount] = newCombo;
-              }
+            if (collected > 0) {
+              const amount = denom * collected;
+              combinedResultText += `${denom}円×${collected}枚 = ${amount.toLocaleString()}円\n`;
+              totalCollected += amount;
             }
           }
-        }
-      }
+          combinedResultText += `合計{totalCollected.toLocaleString()}円\n\n`;
+          
+          combinedResultText += `封筒に入れるもの\n`;
+          let 補填合計 = 0;
+          for (let denom of denominations) {
+            if (combo[denom]) {
+              const amount = denom * combo[denom];
+              補填合計 += amount;
+              combinedResultText += `${denom}円×${combo[denom]}枚 = ${amount.toLocaleString()}円\n`;
+            }
+          }
+          combinedResultText += `合計{補填合計.toLocaleString()}円`;
 
-      knapsackCache.set(key, dp[targetAmount]);
-      return dp[targetAmount];
-    }
+          document.getElementById("changeCollectionResult").innerText = combinedResultText;
+        };
 
-    function totalCoins(combo) {
-      return Object.values(combo).reduce((sum, c) => sum + c, 0);
+        /**
+         * Worker エラーハンドラ
+         */
+        worker.onerror = (e) => {
+          console.error('Worker error:', e);
+          document.getElementById("adjustmentResult").innerText = `※ 計算中にエラーが発生しました: ${e.message}`;
+          isCalculating = false;
+          
+          const adjButton = document.querySelector('button[onclick="adjustShortage()"]');
+          if (adjButton) {
+              adjButton.disabled = false;
+              adjButton.classList.remove('bg-gray-400');
+              adjButton.classList.add('bg-green-500');
+          }
+        };
     }
+    
   </script>
 </body>
 </html>
