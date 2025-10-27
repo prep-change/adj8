@@ -297,8 +297,9 @@
               totalCollected += amount;
             }
           }
+          
           // ▼▼▼ 修正済み (1/2) ▼▼▼
-          combinedResultText += `合計 \${totalCollected.toLocaleString()}円\n\n`;
+          combinedResultText += `合計 ${totalCollected.toLocaleString()}円\n\n`;
           
           combinedResultText += `封筒に入れるもの\n`;
           let 補填合計 = 0;
@@ -309,8 +310,9 @@
               combinedResultText += `${denom}円×${combo[denom]}枚 = ${amount.toLocaleString()}円\n`;
             }
           }
+          
           // ▼▼▼ 修正済み (2/2) ▼▼▼
-          combinedResultText += `合計 \${補填合計.toLocaleString()}円`;
+          combinedResultText += `合計 ${補填合計.toLocaleString()}円`;
 
           document.getElementById("changeCollectionResult").innerText = combinedResultText;
         };
