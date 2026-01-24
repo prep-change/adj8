@@ -8,12 +8,12 @@
 </head>
 <body class="bg-gray-100">
   <div class="max-w-2xl mx-auto p-4">
-    <h1 class="text-2xl font-bold mb-4 text-center">釣銭準備（完全一致モード）</h1>
+    <h1 class="text-2xl font-bold mb-4 text-center">釣銭準備</h1>
 
     <div id="input-area" class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6"></div>
 
     <button onclick="calculateShortage()" class="w-full bg-blue-500 text-white py-2 rounded mb-4">不足を計算する</button>
-    <button onclick="adjustShortage()" class="w-full bg-green-600 text-white py-2 rounded">調整（封筒計算）</button>
+    <button onclick="adjustShortage()" class="w-full bg-green-500 text-white py-2 rounded">調整</button>
 
     <div id="shortageResult" class="mt-6 bg-white p-4 rounded shadow whitespace-pre-wrap"></div>
     <div id="adjustmentResult" class="mt-6 bg-white p-4 rounded shadow whitespace-pre-wrap"></div>
@@ -21,7 +21,7 @@
   </div>
 
   <script>
-    
+    // --- 設定値 ---
     const denominations = [10000, 5000, 2000, 1000, 500, 100, 50, 10, 5, 1];
     const baseTargets = {
       10000: 0,
@@ -36,17 +36,19 @@
       1: 20
     };
 
+    // --- UI生成 (初期コードと同じ) ---
     const inputArea = document.getElementById("input-area");
     denominations.forEach(denom => {
       const wrapper = document.createElement("div");
       wrapper.className = "flex items-center space-x-2 min-w-0";
       wrapper.innerHTML = `
         <label class="w-20 font-medium">${denom}円</label>
-        <input id="input${denom}" type="number" min="0" value="" placeholder="0" class="flex-1 p-1 border rounded w-full" />
+        <input id="input${denom}" type="number" min="0" value="" class="flex-1 p-1 border rounded w-full" />
       `;
       inputArea.appendChild(wrapper);
     });
 
+    // 入力値取得ヘルパー
     function getInput() {
       const input = {};
       denominations.forEach(denom => {
@@ -56,6 +58,7 @@
       return input;
     }
 
+    // --- 不足計算機能 (UI出力先は変えず、ロジックのみ整理) ---
     function calculateShortage() {
       const input = getInput();
       let resultText = `【現在の不足状況】\n`;
@@ -65,7 +68,7 @@
       for (let denom of denominations) {
         const diff = baseTargets[denom] - input[denom];
         if (diff > 0) {
-          resultText += `${denom}円が ${diff}枚 不足\n`;
+          resultText += `${denom}円×${diff}枚 = ${(denom * diff).toLocaleString()}円\n`;
           totalShortage += denom * diff;
           hasShortage = true;
         }
@@ -74,21 +77,22 @@
       if (!hasShortage) {
         resultText += "不足はありません。";
       } else {
-        resultText += `\n不足金額合計: ${totalShortage.toLocaleString()}円`;
+        resultText += `合計　${totalShortage.toLocaleString()}円`;
       }
       
+      // 元のUIIDに出力
       document.getElementById("shortageResult").innerText = resultText;
       document.getElementById("adjustmentResult").innerText = "";
       document.getElementById("changeCollectionResult").innerText = "";
     }
 
+    // --- 調整機能 (見た目は変えず、中身を「完全一致モード」に変更) ---
     async function adjustShortage() {
       const input = getInput();
       
       // 1. 不足額（ターゲット）の計算
       const shortageCounts = {};
       let targetAmount = 0;
-
       for (let denom of denominations) {
         const diff = baseTargets[denom] - input[denom];
         if (diff > 0) {
@@ -98,16 +102,15 @@
       }
 
       if (targetAmount === 0) {
-        document.getElementById("adjustmentResult").innerText = "不足がないため、両替の必要はありません。";
+        document.getElementById("adjustmentResult").innerText = "不足がないため、調整の必要はありません。";
         document.getElementById("changeCollectionResult").innerText = "";
         return;
       }
 
       document.getElementById("adjustmentResult").innerText = "計算中...";
-      await new Promise(r => setTimeout(r, 10)); // UI更新用
+      await new Promise(r => setTimeout(r, 10)); 
 
       // 2. 余剰金（リソース）のリストアップ
-      // { denom: 1000, count: 5 } 形式の配列を作成
       const surplusCoins = [];
       let totalSurplus = 0;
       for (let denom of denominations) {
@@ -120,7 +123,8 @@
 
       // 明らかに足りない場合
       if (totalSurplus < targetAmount) {
-        showFailure(`余剰金合計(${totalSurplus}円)が不足額(${targetAmount}円)より少ないため、両替不可能です。\n金庫から現金を足してください。`);
+        document.getElementById("adjustmentResult").innerText = `※ 調整不可\n余剰金合計(${totalSurplus.toLocaleString()}円)が不足額(${targetAmount.toLocaleString()}円)より少ないため、両替できません。\n金庫から現金を足してください。`;
+        document.getElementById("changeCollectionResult").innerText = "";
         return;
       }
 
@@ -128,63 +132,50 @@
       const resultCombo = findExactCombination(surplusCoins, targetAmount);
 
       if (!resultCombo) {
-        showFailure(`【調整失敗】\n不足額 ${targetAmount.toLocaleString()}円 を、手元の余剰金種だけで\n「ぴったり」作ることができませんでした。\n\n（例: 1万円札しか余っていないのに、数千円分の小銭が欲しい場合など）\n\n対処法：\n・金庫から細かいお金を持ってきて入力し直す\n・諦めて銀行で有人両替する`);
+        // 失敗時
+        document.getElementById("adjustmentResult").innerText = `※ 調整失敗（ぴったり両替不可）\n不足額 ${targetAmount.toLocaleString()}円 を、手元の余剰金種だけでぴったり作ることができませんでした。\n（お釣りが発生する組み合わせしかありません）`;
+        document.getElementById("changeCollectionResult").innerText = "";
         return;
       }
 
-      // 4. 成功時の表示
+      // 4. 成功時の表示（元のUIエリアに出力）
       
-      // A. 封筒に入れるもの
-      let adjustmentText = `【成功】 ぴったり両替できます\n\n`;
-      adjustmentText += `▼ 銀行へ持っていく（封筒に入れる）\n`;
+      // adjustmentResult には「銀行へ持っていくもの（封筒）」を表示
+      let adjustmentText = `【銀行へ持っていく】(封筒に入れる)\n`;
       let payTotalCheck = 0;
-      
-      // 見やすいように大きい金額順にソートして表示
       const sortedComboKeys = Object.keys(resultCombo).map(Number).sort((a,b) => b - a);
       
       for (let denom of sortedComboKeys) {
         const count = resultCombo[denom];
         if (count > 0) {
-          adjustmentText += `  ${denom}円 × ${count}枚 = ${(denom * count).toLocaleString()}円\n`;
+          adjustmentText += `${denom}円×${count}枚 = ${(denom * count).toLocaleString()}円\n`;
           payTotalCheck += denom * count;
         }
       }
-      adjustmentText += `  ----------------\n`;
-      adjustmentText += `  合計: ${payTotalCheck.toLocaleString()}円 (不足額と一致)`;
+      adjustmentText += `合計　${payTotalCheck.toLocaleString()}円`;
       
       document.getElementById("adjustmentResult").innerText = adjustmentText;
 
-      // B. ドロアに入れるもの
-      let collectionText = `▼ 銀行から戻ったら（ドロアへ）\n`;
+      // changeCollectionResult には「銀行から戻ってきた後の補充（ドロア）」を表示
+      let collectionText = `【銀行から戻ったら】(ドロアへ補充)\n`;
       for (let denom of denominations) {
         if (shortageCounts[denom]) {
-           collectionText += `  ${denom}円 × ${shortageCounts[denom]}枚\n`;
+           collectionText += `${denom}円×${shortageCounts[denom]}枚\n`;
         }
       }
-      
-      collectionText += `\n----------------\n`;
-      collectionText += `【最終確認】\n`;
-      collectionText += `両替後、全ての金種が目標枚数以上になります。\n`;
-      collectionText += `※余ったお金（155,600円超過分）はそのままドロアに残ります。`;
+      collectionText += `\nこれで準備金は 155,600円 になります。`; // 目標値固定前提のメッセージ
 
       document.getElementById("changeCollectionResult").innerText = collectionText;
     }
 
-    function showFailure(msg) {
-      document.getElementById("adjustmentResult").innerText = msg;
-      document.getElementById("adjustmentResult").className = "mt-6 bg-red-100 text-red-800 p-4 rounded shadow whitespace-pre-wrap border border-red-300";
-      document.getElementById("changeCollectionResult").innerText = "";
-    }
-
-    // 再帰的に組み合わせを探す関数
+    // 再帰的に組み合わせを探す関数（ロジック部分は最新版）
     function findExactCombination(availableCoins, target) {
-      // メモ化用キャッシュ（再帰の枝刈り）
       const memo = new Map();
 
       function solve(index, currentTarget) {
-        if (currentTarget === 0) return {}; // 解決
-        if (currentTarget < 0) return null; // 失敗
-        if (index >= availableCoins.length) return null; // 金種切れ
+        if (currentTarget === 0) return {}; 
+        if (currentTarget < 0) return null; 
+        if (index >= availableCoins.length) return null; 
 
         const key = `${index}-${currentTarget}`;
         if (memo.has(key)) return memo.get(key);
@@ -193,31 +184,21 @@
         const denom = coin.denom;
         const maxCount = coin.count;
 
-        // この金種を i 枚使うパターンを試す（多い方から試すことで枚数最小化を狙う）
-        // ただし、計算速度優先なら単なるループでOK
         for (let i = Math.min(maxCount, Math.floor(currentTarget / denom)); i >= 0; i--) {
           const remaining = currentTarget - (denom * i);
-          
-          // 次の金種へ
           const result = solve(index + 1, remaining);
           
           if (result !== null) {
-            // 解が見つかった場合、現在の枚数を記録して返す
-            if (i > 0) {
-              result[denom] = i;
-            }
+            if (i > 0) result[denom] = i;
             memo.set(key, result);
             return result;
           }
         }
-
         memo.set(key, null);
         return null;
       }
-
       return solve(0, target);
     }
-
   </script>
 </body>
 </html>
