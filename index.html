@@ -189,7 +189,44 @@
       }
       return null;
     }
+    
+async function findOptimalAdjustmentAsync(input, baseTargets, excludeSet, maxTry = 20) {
+      for (let t = 0; t <= maxTry; t++) {
+        // UI更新のために少し待つ
+        if (t % 3 === 0) {
+          await new Promise(resolve => setTimeout(resolve, 0));
+        }
+        
+        const patterns = generateAdjustmentPatterns(baseTargets, t, excludeSet);
+        for (let newTargets of patterns) {
+          const shortage = {};
+          let shortageTotal = 0;
 
+          for (let denom of denominations) {
+            const need = newTargets[denom] || 0;
+            const lack = Math.max(0, need - input[denom]);
+            if (lack > 0) {
+              shortage[denom] = lack;
+              shortageTotal += denom * lack;
+            }
+          }
+
+          const usableCoins = denominations.map(denom => {
+            const adjustedInput = input[denom] + (shortage[denom] || 0);
+            const usable = adjustedInput - (newTargets[denom] || 0);
+            return [denom, usable];
+          }).filter(([_, count]) => count > 0);
+
+          const combo = knapsack(usableCoins, shortageTotal);
+          if (combo) {
+            return { newTargets, shortage, shortageTotal, combo };
+          }
+        }
+      }
+      return null;
+    }
+    
+    
     function generateAdjustmentPatterns(baseTargets, extraCount, excludeSet) {
       if (extraCount === 0) return [Object.assign({}, baseTargets)];
       const patterns = [];
