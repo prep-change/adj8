@@ -37,7 +37,7 @@
 
     let latestInput = {};
 
-    // Web Workerの作成！
+    // Web Workerを初期化
     const worker = new Worker('worker.js');
 
     const inputArea = document.getElementById("input-area");
@@ -82,19 +82,24 @@
 
       document.getElementById("adjustmentResult").innerText = "調整中です...";
 
-      // Workerにデータを送信
-      worker.postMessage({ action: 'adjustShortage', input: latestInput, baseTargets, denominations });
+      // Web Workerにデータを送信して調整処理を依頼
+      worker.postMessage({
+        action: 'adjustShortage',
+        input: latestInput,
+        baseTargets: baseTargets,
+        denominations: denominations
+      });
 
-      // Workerの結果を受け取る
+      // Web Workerからの結果を受け取る
       worker.onmessage = (event) => {
         const { success, shortageResultText, combinedResultText } = event.data;
 
-        if (!success) {
-          document.getElementById("adjustmentResult").innerText = "※ 補填できませんでした。";
-          document.getElementById("changeCollectionResult").innerText = "";
-        } else {
+        if (success) {
           document.getElementById("adjustmentResult").innerText = shortageResultText;
           document.getElementById("changeCollectionResult").innerText = combinedResultText;
+        } else {
+          document.getElementById("adjustmentResult").innerText = "※ 補填できませんでした。";
+          document.getElementById("changeCollectionResult").innerText = "";
         }
       };
     }
