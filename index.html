@@ -147,7 +147,7 @@
       document.getElementById("changeCollectionResult").innerText = combinedResultText;
     }
 
-    function findOptimalAdjustment(input, baseTargets, excludeSet, maxTry = 12) {
+    function findOptimalAdjustment(input, baseTargets, excludeSet, maxTry = 6) {
       for (let t = 0; t <= maxTry; t++) {
         const patterns = generateAdjustmentPatterns(baseTargets, t, excludeSet);
         for (let newTargets of patterns) {
@@ -155,7 +155,6 @@
           let shortageTotal = 0;
 
           for (let denom of denominations) {
-            // 修正：不足が目標を超えないよう制約を追加
             const need = Math.min(baseTargets[denom], newTargets[denom] || 0);
             const lack = Math.max(0, need - input[denom]);
             if (lack > 0) {
@@ -184,7 +183,8 @@
       const patterns = [];
       const denoms = Object.keys(baseTargets).map(Number);
 
-      function backtrack(i, remaining, current) {
+      function backtrack(i, remaining, current, depth) {
+        if (depth > 3) return; // 探索制約を追加
         if (i === denoms.length) {
           if (remaining === 0) patterns.push({ ...current });
           return;
@@ -193,22 +193,24 @@
         const limit = excludeSet.has(denom) ? 0 : remaining;
         for (let add = 0; add <= limit; add++) {
           current[denom] = baseTargets[denom] + add;
-          backtrack(i + 1, remaining - add, current);
+          backtrack(i + 1, remaining - add, current, depth + 1);
         }
       }
 
-      backtrack(0, extraCount, {});
+      backtrack(0, extraCount, {}, 0);
       return patterns;
     }
 
     function knapsack(usableCoins, targetAmount) {
-      const key = JSON.stringify(usableCoins) + "|" + targetAmount;
+      const sortedCoins = usableCoins.sort((a, b) => b[0] - a[0]);
+      const key = JSON.stringify(sortedCoins) + "|" + targetAmount;
+
       if (knapsackCache.has(key)) return knapsackCache.get(key);
 
       const dp = Array(targetAmount + 1).fill(null);
       dp[0] = {};
 
-      for (let [denom, count] of usableCoins) {
+      for (let [denom, count] of sortedCoins) {
         for (let a = targetAmount; a >= 0; a--) {
           if (dp[a] !== null) {
             for (let k = 1; k <= count; k++) {
