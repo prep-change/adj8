@@ -191,9 +191,10 @@
     }
     const denom = denoms[i];
     
-    // 元のコードの構造を維持し、1000円の制限（9枚）を追加
     const limit = excludeSet.has(denom) ? 0 : 
+                  (denom === 10000) ? 0 :
                   (denom === 5000) ? Math.min(1, remaining) : 
+                  (denom === 2000) ? 0 :
                   (denom === 1000) ? Math.min(9, remaining) : remaining;
 
     for (let add = 0; add <= limit; add++) {
@@ -205,6 +206,7 @@
   backtrack(0, extraCount, {});
   return patterns;
 }
+
 
     function knapsack(usableCoins, targetAmount) {
       const key = JSON.stringify(usableCoins) + "|" + targetAmount;
