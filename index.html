@@ -204,10 +204,10 @@
     const denom = denoms[i];
     
     const limit = excludeSet.has(denom) ? 0 : 
-                  (denom === 10000) ? 0 :
-                  (denom === 5000) ? Math.min(1, remaining) : 
-                  (denom === 2000) ? 0 :
-                  (denom === 1000) ? Math.min(9, remaining) : remaining;
+              (denom === 10000 || denom === 2000) ? 0 :
+              (denom === 5000) ? Math.min(1, remaining) : 
+              (denom === 1000 || denom === 500 || denom === 100 || denom === 50 || denom === 10 || denom === 5 || denom === 1) ? Math.min(9, remaining) : 
+              remaining;
 
     for (let add = 0; add <= limit; add++) {
       current[denom] = baseTargets[denom] + add;
