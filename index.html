@@ -148,19 +148,31 @@
       document.getElementById("changeCollectionResult").innerText = combinedResultText;
     }
 
-    function findOptimalAdjustment(input, baseTargets, excludeSet, maxTry = 14) {
+    // 途中で「休憩」を入れるために async を追加
+async function findOptimalAdjustment(input, baseTargets, excludeSet, maxTry = 18) {
+  let totalIterations = 0; 
+
   for (let t = 0; t <= maxTry; t++) {
     const patterns = generateAdjustmentPatterns(baseTargets, t, excludeSet);
+    
     for (let newTargets of patterns) {
+      totalIterations++;
+
+      // 【フリーズ対策】5,000回ごとにブラウザを一度解放する
+      // これにより、あなたのスマホで「15枚」にした時の沈黙を回避できます
+      if (totalIterations % 5000 === 0) {
+        await new Promise(resolve => setTimeout(resolve, 0));
+      }
+
       const shortage = {};
       let shortageTotal = 0;
-      let isValidPattern = true; // チェック用フラグ
+      let isValidPattern = true;
 
       for (let denom of denominations) {
         const need = newTargets[denom] || 0;
         const lack = Math.max(0, need - input[denom]);
 
-        // 【制約】調整後の不足枚数(lack)が、元の目標枚数(baseTargets)を超えたらそのパターンは破棄
+        // 【制約】不足枚数が元の目標枚数を超えない
         if (lack > (baseTargets[denom] || 0)) {
           isValidPattern = false;
           break;
@@ -172,7 +184,6 @@
         }
       }
 
-      // 制約に引っかかった場合は次のパターンへ
       if (!isValidPattern) continue;
 
       const usableCoins = denominations.map(denom => {
@@ -181,6 +192,8 @@
         return [denom, usable];
       }).filter(([_, count]) => count > 0);
 
+      // ここで実行されるナップサック計算の累積負荷がフリーズの原因でしたが、
+      // 直前の setTimeout(0) が「防波堤」になります
       const combo = knapsack(usableCoins, shortageTotal);
       if (combo) {
         return { newTargets, shortage, shortageTotal, combo };
@@ -189,6 +202,7 @@
   }
   return null;
 }
+
 
 
     function generateAdjustmentPatterns(baseTargets, extraCount, excludeSet) {
