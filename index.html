@@ -148,7 +148,7 @@
       document.getElementById("changeCollectionResult").innerText = combinedResultText;
     }
 
-    function findOptimalAdjustment(input, baseTargets, excludeSet, maxTry = 12) {
+    function findOptimalAdjustment(input, baseTargets, excludeSet, maxTry = 30) {
   for (let t = 0; t <= maxTry; t++) {
     const patterns = generateAdjustmentPatterns(baseTargets, t, excludeSet);
     for (let newTargets of patterns) {
