@@ -149,35 +149,47 @@
     }
 
     function findOptimalAdjustment(input, baseTargets, excludeSet, maxTry = 12) {
-      for (let t = 0; t <= maxTry; t++) {
-        const patterns = generateAdjustmentPatterns(baseTargets, t, excludeSet);
-        for (let newTargets of patterns) {
-          const shortage = {};
-          let shortageTotal = 0;
+  for (let t = 0; t <= maxTry; t++) {
+    const patterns = generateAdjustmentPatterns(baseTargets, t, excludeSet);
+    for (let newTargets of patterns) {
+      const shortage = {};
+      let shortageTotal = 0;
+      let isValidPattern = true; // チェック用フラグ
 
-          for (let denom of denominations) {
-            const need = newTargets[denom] || 0;
-            const lack = Math.max(0, need - input[denom]);
-            if (lack > 0) {
-              shortage[denom] = lack;
-              shortageTotal += denom * lack;
-            }
-          }
+      for (let denom of denominations) {
+        const need = newTargets[denom] || 0;
+        const lack = Math.max(0, need - input[denom]);
 
-          const usableCoins = denominations.map(denom => {
-            const adjustedInput = input[denom] + (shortage[denom] || 0);
-            const usable = adjustedInput - (newTargets[denom] || 0);
-            return [denom, usable];
-          }).filter(([_, count]) => count > 0);
+        // 【制約】調整後の不足枚数(lack)が、元の目標枚数(baseTargets)を超えたらそのパターンは破棄
+        if (lack > (baseTargets[denom] || 0)) {
+          isValidPattern = false;
+          break;
+        }
 
-          const combo = knapsack(usableCoins, shortageTotal);
-          if (combo) {
-            return { newTargets, shortage, shortageTotal, combo };
-          }
+        if (lack > 0) {
+          shortage[denom] = lack;
+          shortageTotal += denom * lack;
         }
       }
-      return null;
+
+      // 制約に引っかかった場合は次のパターンへ
+      if (!isValidPattern) continue;
+
+      const usableCoins = denominations.map(denom => {
+        const adjustedInput = input[denom] + (shortage[denom] || 0);
+        const usable = adjustedInput - (newTargets[denom] || 0);
+        return [denom, usable];
+      }).filter(([_, count]) => count > 0);
+
+      const combo = knapsack(usableCoins, shortageTotal);
+      if (combo) {
+        return { newTargets, shortage, shortageTotal, combo };
+      }
     }
+  }
+  return null;
+}
+
 
     function generateAdjustmentPatterns(baseTargets, extraCount, excludeSet) {
   if (extraCount === 0) return [Object.assign({}, baseTargets)];
